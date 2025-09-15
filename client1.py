@@ -13,7 +13,7 @@ import re
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+
 
 load_dotenv()
 
