@@ -1,0 +1,17 @@
+fastmcp
+mysql-connector-python
+psycopg2-binary
+groq
+uvicorn
+pyodbc
+streamlit
+pandas
+pillow
+openai
+fastmcp
+python-dotenv
+asyncio
+langchain_groq
+langchain_core
+plotly
+anthropic
