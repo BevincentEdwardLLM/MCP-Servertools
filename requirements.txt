@@ -15,3 +15,4 @@ langchain_groq
 langchain_core
 plotly
 anthropic
+langchain_openai
