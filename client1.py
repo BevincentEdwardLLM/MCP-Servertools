@@ -13,19 +13,20 @@ import re
 import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
-
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
-# Initialize Groq client with environment variable
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    st.error("🔐 GROQ_API_KEY environment variable is not set. Please add it to your environment.")
+# Initialize OpenAI client with environment variable
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+if not OPENAI_API_KEY:
+    st.error("🔐 OPENAI_API_KEY environment variable is not set. Please add it to your .env file.")
     st.stop()
 
-groq_client = ChatGroq(
-    groq_api_key=GROQ_API_KEY,
-    model_name=os.environ.get("GROQ_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+
+llm_client = ChatOpenAI(
+    openai_api_key=OPENAI_API_KEY,
+    model_name=os.environ.get("OPENAI_MODEL", "gpt-4o") # Using gpt-4o as a modern default
 )
 
 
@@ -635,7 +636,7 @@ Please respond naturally and reference prior conversation context where helpful.
 
     try:
         messages = [SystemMessage(content=system_prompt)] + messages_for_llm + [HumanMessage(content=user_prompt)]
-        response = groq_client.invoke(messages)
+        response = llm_client.invoke(messages)
         return response.content.strip()
     except Exception as e:
         # Fallback response if LLM call fails
@@ -848,415 +849,78 @@ st.markdown("""
 
 
 def parse_user_query(query: str, available_tools: dict) -> dict:
-    """Enhanced parse user query with better DELETE operation handling"""
-
+    """
+    Takes a natural language query and uses an LLM to generate a JSON object
+    containing the appropriate tool and a valid BigQuery SQL query.
+    """
     if not available_tools:
-        return {"error": "No tools available"}
+        return {"error": "No tools available to query."}
 
-    # Build comprehensive tool information for the LLM
-    tool_info = []
-    for tool_name, tool_desc in available_tools.items():
-        tool_info.append(f"- **{tool_name}**: {tool_desc}")
+    # Build a detailed description of all available tools for the LLM prompt.
+    tool_descriptions = "\n".join(
+        [f"- **{name}**: {desc}" for name, desc in available_tools.items()]
+    )
 
-    tools_description = "\n".join(tool_info)
+    system_prompt = f"""
+You are an expert Google BigQuery SQL writer. Your goal is to convert a user's natural language question into a single, valid BigQuery SQL query.
 
-    system_prompt = (
-    "You are an intelligent database router for CRUD operations. "
-    "Your job is to analyze the user's query and select the most appropriate tool based on the context and data being requested.\n\n"
+**RULES:**
+1.  You will be given a list of available tools. Each tool corresponds to one or more tables in BigQuery.
+2.  Analyze the user's query to determine which tool and table(s) are most relevant.
+3.  You MUST use the full, exact table names provided in the tool descriptions (e.g., `genai-poc-424806.MCP_demo.Customer`). Do not shorten them.
+4.  Your response MUST be a single JSON object with two keys: "tool" and "sql".
+5.  The "tool" value must be the name of the most appropriate tool to use.
+6.  The "sql" value must be the complete, syntactically correct BigQuery SQL query.
 
-    "RESPONSE FORMAT:\n"
-    "Reply with exactly one JSON object: {\"tool\": string, \"action\": string, \"args\": object}\n\n"
+**AVAILABLE TOOLS AND THEIR TABLES:**
+{tool_descriptions}
 
-    "ACTION MAPPING:\n"
-    "- 'read': for viewing, listing, showing, displaying, or getting records\n"
-    "- 'create': for adding, inserting, or creating NEW records\n"
-    "- 'update': for modifying, changing, or updating existing records\n"
-    "- 'delete': for removing, deleting, or destroying records\n"
-    "- 'describe': for showing table structure, schema, or column information\n"
-    "- 'analyze': for analytical queries and statistical reports (calllogs_crud only)\n\n"
+**EXAMPLE USER QUERY:** "Show me all feedback for product 101 from the oracle source"
 
-    "CRITICAL TOOL SELECTION RULES:\n"
-    "\n"
-    "1. **PRODUCT QUERIES** → Use 'postgresql_crud':\n"
-    "   - 'list products', 'show products', 'display products'\n"
-    "   - 'product inventory', 'product catalog', 'product information'\n"
-    "   - 'add product', 'create product', 'new product'\n"
-    "   - 'update product', 'change product price', 'modify product'\n"
-    "   - 'delete product', 'remove product', 'delete [ProductName]'\n"
-    "   - Any query primarily about products, pricing, or inventory\n"
-    "\n"
-    "2. **CUSTOMER QUERIES** → Use 'sqlserver_crud':\n"
-    "   - 'list customers', 'show customers', 'display customers'\n"
-    "   - 'customer information', 'customer details'\n"
-    "   - 'add customer', 'create customer', 'new customer'\n"
-    "   - 'update customer', 'change customer email', 'modify customer'\n"
-    "   - 'delete customer', 'remove customer', 'delete [CustomerName]'\n"
-    "   - Any query primarily about customers, names, or emails\n"
-    "\n"
-    "3. **SALES/TRANSACTION QUERIES** → Use 'sales_crud':\n"
-    "   - 'list sales', 'show sales', 'sales data', 'transactions'\n"
-    "   - 'sales report', 'revenue data', 'purchase history'\n"
-    "   - 'who bought what', 'customer purchases'\n"
-    "   - Cross-database queries combining customer + product + sales info\n"
-    "   - 'create sale', 'add sale', 'new transaction'\n"
-    "   - Any query asking for combined data from multiple tables\n"
-    "\n"
-    "4. **CARE PLAN QUERIES** → Use 'careplan_crud':\n"
-    "   - 'show care plans', 'list patients', 'display care plans', 'patient records'\n"
-    "   - 'list care plans with name John', 'patients with diabetes'\n"
-    "   - 'show care plan details', 'display patient information'\n"
-    "   - 'patients needing housing assistance', 'care plans with employment status'\n"
-    "   - 'reentry care plans', 'general care plans'\n"
-    "   - Any query related to healthcare records, patient information, or care management\n\n"
+**EXAMPLE RESPONSE:**
+{{
+  "tool": "Oracle_CustomerFeedback",
+  "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.CustomerFeedback` WHERE ProductID = 101"
+}}
 
-    "5. **CALL LOG ANALYSIS QUERIES** → Use 'calllogs_crud':\n"
-    "   - 'analyze call logs', 'show call statistics', 'call center metrics'\n"
-    "   - 'agent performance', 'sentiment analysis', 'issue frequency'\n"
-    "   - 'call volume trends', 'escalation analysis', 'resolution rates'\n"
-    "   - 'show calls by agent [AgentName]', 'calls with negative sentiment'\n"
-    "   - 'call duration analysis', 'wait time statistics'\n"
-    "   - 'top issue categories', 'service quality metrics'\n"
-    "   - Use 'operation': 'analyze' for analytical reports\n"
-    "   - Use 'operation': 'read' for raw call log data\n"
-    "   - Any query related to call logs, agent performance, or customer service metrics\n\n"
+Now, analyze the user's query and generate the correct JSON response.
+"""
 
-    "**ENHANCED CARE PLAN FIELD MAPPING:**\n"
-    "The CarePlan table now includes comprehensive real-world fields:\n"
-    "- Base: 'actual_release_date', 'name_of_youth', 'race_ethnicity', 'medi_cal_id_number'\n"
-    "- Health: 'health_screenings', 'health_assessments', 'chronic_conditions', 'prescribed_medications'\n"
-    "- Reentry: 'housing', 'employment', 'income_benefits', 'transportation', 'life_skills'\n"
-    "- Clinical: 'screenings', 'clinical_assessments', 'treatment_history', 'scheduled_appointments'\n"
-    "- Support: 'family_children', 'emergency_contacts', 'service_referrals', 'court_dates'\n"
-    "- Equipment: 'home_modifications', 'durable_medical_equipment'\n"
-    "- Metadata: 'care_plan_type', 'status', 'notes'\n\n"
-
-    "**ETL & DISPLAY FORMATTING RULES:**\n"
-    "For any data formatting requests (e.g., rounding decimals, changing date formats, handling nulls), "
-    "you MUST use the `display_format` parameter within the `sales_crud` tool.\n\n"
-
-    "1. **DECIMAL FORMATTING:**\n"
-    "   - If the user asks to 'round', 'format to N decimal places', or mentions 'decimals'.\n"
-    "   - Use: {\"display_format\": \"Decimal Value Formatting\"}\n"
-    "   - **Example Query:** 'show sales with 2 decimal places'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Decimal Value Formatting\"}}\n"
-
-    "2. **DATE FORMATTING:**\n"
-    "   - If the user asks to 'format date', 'show date as YYYY-MM-DD', or similar.\n"
-    "   - Use: {\"display_format\": \"Data Format Conversion\"}\n"
-    "   - **Example Query:** 'show sales with formatted dates'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Data Format Conversion\"}}\n"
-
-    "3. **NULL VALUE HANDLING:**\n"
-    "   - If the user asks to 'remove nulls', 'replace empty values', or 'handle missing data'.\n"
-    "   - Use: {\"display_format\": \"Null Value Removal/Handling\"}\n"
-    "   - **Example Query:** 'show sales but remove records with missing info'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"Null Value Removal/Handling\"}}\n"
-
-    "4. **STRING CONCATENATION:**\n"
-    "   - If the user asks to 'combine names', 'create a full description', or 'show full name'.\n"
-    "   - Use: {\"display_format\": \"String Concatenation\"}\n"
-    "   - **Example Query:** 'show sales with customer full names'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"sales_crud\", \"action\": \"read\", \"args\": {\"display_format\": \"String Concatenation\"}}\n"
-
-    "5. **CARE PLAN COLUMN FILTERING:**\n"
-    "   - If the user asks to 'show only name and chronic conditions', 'remove address', or 'exclude phone'.\n"
-    "   - Use: `columns` field in args with positive or negative column names.\n"
-    "   - **Example Query:** 'show only name and chronic conditions from care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"name_of_youth,chronic_conditions\"}}\n"
-    "   - **Example Query:** 'show care plans without address and phone'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"columns\": \"*,-residential_address,-telephone\"}}\n"
-
-    "6. **CARE PLAN FILTERING BY TEXT OR VALUE:**\n"
-    "   - If user asks 'care plans mentioning diabetes in chronic conditions', use LIKE\n"
-    "   - Use: {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}\n"
-    "   - **Example Query:** 'list patients with diabetes'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"chronic_conditions LIKE '%diabetes%'\"}}\n"
-    "   - **Example Query:** 'care plans where name is John'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"name_of_youth = 'John'\"}}\n"
-    "   - **Example Query:** 'show patients needing housing assistance'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"where_clause\": \"housing LIKE '%assistance%' OR housing = 'Homeless'\"}}\n"
-
-    "7. **CARE PLAN TYPE FILTERING:**\n"
-    "   - If user asks for 'reentry care plans' or 'general care plans'\n"
-    "   - Use: {\"care_plan_type\": \"Reentry Care Plan\"} or {\"care_plan_type\": \"General Care Plan\"}\n"
-    "   - **Example Query:** 'show reentry care plans'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"careplan_crud\", \"action\": \"read\", \"args\": {\"care_plan_type\": \"Reentry Care Plan\"}}\n"
-
-    "8. **CALL LOGS ANALYSIS TYPES:**\n"
-    "   - sentiment_by_agent: Agent sentiment performance\n"
-    "   - issue_frequency: Most common issues\n"
-    "   - call_volume_trends: Daily call trends\n"
-    "   - escalation_analysis: Escalation rates by issue\n"
-    "   - agent_performance: Comprehensive agent metrics\n"
-    "   - **Example Query:** 'analyze agent performance'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"analyze\", \"args\": {\"analysis_type\": \"agent_performance\"}}\n"
-
-    "9. **CALL LOGS FILTERING:**\n"
-    "   - Use 'agent_name', 'issue_category', 'sentiment_threshold' for filtering\n"
-    "   - **Example Query:** 'show calls with negative sentiment'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"sentiment_threshold\": -0.1}}\n"
-    "   - **Example Query:** 'calls handled by Sarah Chen'\n"
-    "   - **→ Correct Tool Call:** {\"tool\": \"calllogs_crud\", \"action\": \"read\", \"args\": {\"agent_name\": \"Sarah Chen\"}}\n"
-)
-
-    user_prompt = f"""User query: "{query}"
-
-Analyze the query step by step:
-
-1. What is the PRIMARY INTENT? (product, customer, or sales operation)
-2. What ACTION is being requested? (create, read, update, delete, describe)
-3. What ENTITY NAME needs to be extracted? (for delete/update operations)
-4. What SPECIFIC COLUMNS are requested? (for read operations - extract into 'columns' parameter)
-5. What FILTER CONDITIONS are specified? (for read operations - extract into 'where_clause' parameter)
-6. What PARAMETERS need to be extracted from the natural language?
-
-ENTITY NAME EXTRACTION GUIDELINES (CRITICAL FOR DELETE/UPDATE):
-- For "delete Widget" → extract "Widget" and put in 'name' parameter
-- For "delete product Gadget" → extract "Gadget" and put in 'name' parameter  
-- For "delete customer Alice" → extract "Alice" and put in 'name' parameter
-- For "update price of Tool to 30" → extract "Tool" and put in 'name' parameter, extract "30" and put in 'new_price'
-
-COLUMN EXTRACTION GUIDELINES:
-- Look for patterns like "show X, Y", "display X and Y", "get X, Y from Z"
-- Extract only the column names, map them to standard names
-- Put them in a comma-separated string in the 'columns' parameter
-
-WHERE CLAUSE EXTRACTION GUIDELINES:
-- Look for filtering conditions like "exceed", "above", "greater than", "with price over"
-- Convert natural language to SQL-like conditions
-- Handle currency symbols and numbers properly
-- Put the condition in the 'where_clause' parameter
-
-Respond with the exact JSON format with properly extracted parameters."""
+    user_prompt = f'User query: "{query}"'
 
     try:
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        resp = groq_client.invoke(messages)
+        
+        # Call the LLM to generate the tool and SQL
+        resp = llm_client.invoke(messages)
+        raw_json = _clean_json(resp.content)
 
-        raw = _clean_json(resp.content)
-
+        # Parse the cleaned JSON response
         try:
-            result = json.loads(raw)
+            result = json.loads(raw_json)
         except json.JSONDecodeError:
-            try:
-                result = ast.literal_eval(raw)
-            except:
-                result = {"tool": list(available_tools.keys())[0], "action": "read", "args": {}}
-
-        # Normalize action names
-        if "action" in result and result["action"] in ["list", "show", "display", "view", "get"]:
-            result["action"] = "read"
-
-        # ENHANCED parameter extraction for DELETE and UPDATE operations
-        if result.get("action") in ["delete", "update"]:
-            args = result.get("args", {})
-            
-            # Extract entity name for delete/update operations if not already extracted
-            if "name" not in args:
-                import re
-                
-                # Enhanced regex patterns for delete operations
-                delete_patterns = [
-                    r'(?:delete|remove)\s+customer\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:delete|remove)\s+product\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:delete|remove)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                    r'(?:update|change)\s+(?:price\s+of\s+)?([A-Za-z]+(?:\s+[A-Za-z]+)?)',
-                ]
-                
-                for pattern in delete_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        extracted_name = match.group(1).strip()
-                        # Clean up common words that might be captured
-                        stop_words = ['product', 'customer', 'price', 'email', 'to', 'of', 'the', 'a', 'an']
-                        name_words = [word for word in extracted_name.split() if word.lower() not in stop_words]
-                        if name_words:
-                            args["name"] = ' '.join(name_words)
-                            break
-            
-            # Extract new_price for product updates
-            if result.get("action") == "update" and result.get("tool") == "postgresql_crud" and "new_price" not in args:
-                import re
-                price_match = re.search(r'(?:to|=|\s+)\$?(\d+(?:\.\d+)?)', query, re.IGNORECASE)
-                if price_match:
-                    args["new_price"] = float(price_match.group(1))
-            
-            # Extract new_email for customer updates
-            if result.get("action") == "update" and result.get("tool") == "sqlserver_crud" and "new_email" not in args:
-                import re
-                email_match = re.search(r'(?:to|=|\s+)([\w\.-]+@[\w\.-]+\.\w+)', query, re.IGNORECASE)
-                if email_match:
-                    args["new_email"] = email_match.group(1)
-            
-            result["args"] = args
-
-        # Enhanced parameter extraction for create operations
-        elif result.get("action") == "create":
-            args = result.get("args", {})
-            
-            # Extract name and email from query if not already extracted
-            if result.get("tool") == "sqlserver_crud" and ("name" not in args or "email" not in args):
-                # Try to extract name and email using regex patterns
-                import re
-                
-                # Extract email
-                email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', query)
-                if email_match and "email" not in args:
-                    args["email"] = email_match.group(0)
-                
-                # Extract name (everything between 'customer' and 'with' or before email)
-                if "name" not in args:
-                    # Pattern 1: "create customer [Name] with [email]"
-                    name_match = re.search(r'(?:create|add|new)\s+customer\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 2: "create [Name] [email]" or "add [Name] with [email]"
-                        name_match = re.search(r'(?:create|add|new)\s+([^@]+?)(?:\s+with|\s+[\w\.-]+@)', query, re.IGNORECASE)
-                    if not name_match:
-                        # Pattern 3: Extract everything before the email
-                        if email_match:
-                            name_part = query[:email_match.start()].strip()
-                            name_match = re.search(r'(?:customer|create|add|new)\s+(.+)', name_part, re.IGNORECASE)
-                    
-                    if name_match:
-                        extracted_name = name_match.group(1).strip()
-                        # Clean up common words
-                        extracted_name = re.sub(r'\b(with|email|named|called)\b', '', extracted_name, flags=re.IGNORECASE).strip()
-                        if extracted_name:
-                            args["name"] = extracted_name
-            
-            result["args"] = args
-
-        # Enhanced parameter extraction for read operations with columns and where_clause
-        elif result.get("action") == "read" and result.get("tool") == "sales_crud":
-            args = result.get("args", {})
-            
-            # Extract columns if not already extracted
-            if "columns" not in args:
-                import re
-                
-                # Look for column specification patterns
-                column_patterns = [
-                    r'(?:show|display|get|select)\s+([^,\s]+(?:,\s*[^,\s]+)*?)(?:\s+from|\s+where|\s*$)',
-                    r'(?:show|display|get|select)\s+(.+?)\s+(?:from|where)',
-                    r'display\s+(.+?)(?:\s+from|\s*$)',
-                ]
-                
-                for pattern in column_patterns:
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        columns_text = match.group(1).strip()
-                        
-                        # Clean up and standardize column names
-                        if 'and' in columns_text or ',' in columns_text:
-                            # Multiple columns
-                            columns_list = re.split(r'[,\s]+and\s+|,\s*', columns_text)
-                            cleaned_columns = []
-                            
-                            for col in columns_list:
-                                col = col.strip().lower().replace(' ', '_')
-                                # Map common variations
-                                if col in ['name', 'customer']:
-                                    cleaned_columns.append('customer_name')
-                                elif col in ['price', 'total', 'amount']:
-                                    cleaned_columns.append('total_price')
-                                elif col in ['product']:
-                                    cleaned_columns.append('product_name')
-                                elif col in ['date']:
-                                    cleaned_columns.append('sale_date')
-                                elif col in ['email']:
-                                    cleaned_columns.append('customer_email')
-                                else:
-                                    cleaned_columns.append(col)
-                            
-                            if cleaned_columns:
-                                args["columns"] = ','.join(cleaned_columns)
-                        else:
-                            # Single column
-                            col = columns_text.strip().lower().replace(' ', '_')
-                            if col in ['name', 'customer']:
-                                args["columns"] = 'customer_name'
-                            elif col in ['price', 'total', 'amount']:
-                                args["columns"] = 'total_price'
-                            elif col in ['product']:
-                                args["columns"] = 'product_name'
-                            elif col in ['date']:
-                                args["columns"] = 'sale_date'
-                            elif col in ['email']:
-                                args["columns"] = 'customer_email'
-                            else:
-                                args["columns"] = col
-                        break
-            
-            # Extract where_clause if not already extracted
-            if "where_clause" not in args:
-                import re
-                
-                # Look for filtering conditions
-                where_patterns = [
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:exceed[s]?|above|greater\s+than|more\s+than|>)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:below|less\s+than|under|<)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+total[_\s]*price[_\s]*(?:equal[s]?|is|=)\s*\$?(\d+(?:\.\d+)?)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:>|above|greater\s+than|more\s+than)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:<|below|less\s+than|under)\s*(\d+)',
-                    r'(?:with|where)\s+quantity[_\s]*(?:=|equal[s]?|is)\s*(\d+)',
-                    r'(?:by|for)\s+customer[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                    r'(?:for|of)\s+product[_\s]*([A-Za-z\s]+?)(?:\s|$)',
-                ]
-                
-                for i, pattern in enumerate(where_patterns):
-                    match = re.search(pattern, query, re.IGNORECASE)
-                    if match:
-                        value = match.group(1).strip()
-                        
-                        if i <= 2:  # total_price conditions
-                            if 'exceed' in query.lower() or 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"total_price > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"total_price < {value}"
-                            else:
-                                args["where_clause"] = f"total_price = {value}"
-                        elif i <= 5:  # quantity conditions
-                            if 'above' in query.lower() or 'greater' in query.lower() or 'more' in query.lower():
-                                args["where_clause"] = f"quantity > {value}"
-                            elif 'below' in query.lower() or 'less' in query.lower() or 'under' in query.lower():
-                                args["where_clause"] = f"quantity < {value}"
-                            else:
-                                args["where_clause"] = f"quantity = {value}"
-                        elif i == 6:  # customer name
-                            args["where_clause"] = f"customer_name = '{value}'"
-                        elif i == 7:  # product name
-                            args["where_clause"] = f"product_name = '{value}'"
-                        break
-            
-            result["args"] = args
-
-        # Validate and clean args
-        if "args" in result and isinstance(result["args"], dict):
-            cleaned_args = validate_and_clean_parameters(result.get("tool"), result["args"])
-            result["args"] = cleaned_args
-
-        # Validate tool selection
-        if "tool" in result and result["tool"] not in available_tools:
-            result["tool"] = list(available_tools.keys())[0]
-
+            result = ast.literal_eval(raw_json)
+        
+        # Return the parsed result directly. All old logic is removed.
         return result
 
     except Exception as e:
+        # If any part of the process fails, return a structured error.
         return {
-            "tool": list(available_tools.keys())[0] if available_tools else None,
-            "action": "read",
-            "args": {},
+            "tool": None,
+            "sql": None,
             "error": f"Failed to parse query: {str(e)}"
         }
 
 
-async def _invoke_tool(tool: str, action: str, args: dict) -> any:
+async def _invoke_tool(tool: str, sql: str) -> any: # <-- Changed parameters
     transport = StreamableHttpTransport(f"{st.session_state['MCP_SERVER_URL']}/mcp")
     async with Client(transport) as client:
-        payload = {"operation": action, **{k: v for k, v in args.items() if k != "operation"}}
+        # The payload now only needs the sql parameter, as the tool functions in main.py expect it.
+        payload = {"sql": sql} 
         res_obj = await client.call_tool(tool, payload)
     if res_obj.structured_content is not None:
         return res_obj.structured_content
@@ -1269,8 +933,10 @@ async def _invoke_tool(tool: str, action: str, args: dict) -> any:
         return text
 
 
-def call_mcp_tool(tool: str, action: str, args: dict) -> any:
-    return asyncio.run(_invoke_tool(tool, action, args))
+# In client.py, find the call_mcp_tool function
+
+def call_mcp_tool(tool: str, sql: str) -> any: # <-- Changed parameters
+    return asyncio.run(_invoke_tool(tool, sql))
 
 
 def format_natural(data) -> str:
@@ -1389,173 +1055,83 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
         ]
-        response = groq_client.invoke(messages)
+        response = llm_client.invoke(messages)
         return response.content.strip()
     except Exception as e:
         return f"Retrieved {len(df)} records from the database."
 
 
 # ========== NEW HELPER FUNCTION: RENDER ASSISTANT MESSAGE CONTENT ==========
+# ========== REPLACEMENT FUNCTION ==========
 def render_assistant_message_content(msg: dict):
     """
-    This function contains the logic to render the content of an assistant's message,
-    which can now be called from multiple places (for normal and split-screen views).
+    Renders the assistant's message, now updated for the new SQL-based server response.
     """
     agent_avatar_url = "https://cdn-icons-png.flaticon.com/512/4712/4712039.png"
-
-    if msg.get("format") == "reasoning":
-        st.markdown(
-        f"""
-        <div class="chat-row left">
-            <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
-            <div class="chat-bubble agent-msg agent-bubble"><i>{msg['content']}</i></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    elif msg.get("format") == "multi_step_read" and isinstance(msg["content"], dict):
-        step = msg["content"]
-        st.markdown(
-        f"""
-        <div class="chat-row left">
-            <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
-            <div class="chat-bubble agent-msg agent-bubble">
-                <b>Step: Lookup by name</b> (<code>{step['args'].get('name', '')}</code>)
-            </div>
-        </div>
-        """, unsafe_allow_html=True
-    )
-        with st.expander(f"Lookup Request: {step['tool']}"):
-            st.code(json.dumps({
-            "tool": step['tool'],
-            "action": step['action'],
-            "args": step['args']
-        }, indent=2), language="json")
-        if isinstance(step["result"], dict) and "sql" in step["result"]:
-            with st.expander("Lookup SQL Query Used"):
-                st.code(step["result"]["sql"], language="sql")
-        if isinstance(step["result"], dict) and "result" in step["result"]:
-            with st.expander("Lookup Response"):
-                st.code(json.dumps(step["result"]["result"], indent=2), language="json")
-                if isinstance(step["result"]["result"], list) and step["result"]["result"]:
-                    df = pd.DataFrame(step["result"]["result"])
-                    st.markdown("**Lookup Result Table:**")
-                    st.table(df)
-    elif msg.get("format") == "sql_crud" and isinstance(msg["content"], dict):
-        content = msg["content"]
-        action = msg.get("action", "")
-        tool = msg.get("tool", "")
+    
+    # Check if the message is for displaying results from a tool call
+    if msg.get("format") == "sql_crud" and isinstance(msg["content"], dict):
+        content = msg.get("content", {})
+        request = msg.get("request", {})
         user_query = msg.get("user_query", "")
+        
+        # Extract the generated SQL query from the request
+        sql_query = request.get("sql", "No SQL query was generated.")
+        
+        # Extract results from the server's response
+        result_rows = content.get("rows", [])
+        row_count = content.get("row_count", 0)
+        table_name = content.get("table", "an unknown table")
+        error = content.get("error")
 
-        with st.expander("Details"):
-            if "request" in msg:
-                st.markdown("**Request**")
-                st.code(json.dumps(msg["request"], indent=2), language="json")
-                st.markdown("---")
-            st.markdown("**SQL Query Used**")
-            st.code(content["sql"] or "No SQL executed", language="sql")
-            st.markdown("---")
-            st.markdown("**Response**")
-            if isinstance(content["result"], (dict, list)):
-                st.code(json.dumps(content["result"], indent=2), language="json")
-            else:
-                st.code(content["result"])
+        # Display a conversational summary message
+        summary_message = f"I ran the query against the **{table_name}** table and found **{row_count}** results for you."
+        if error:
+            summary_message = f"I encountered an error trying to query the **{table_name}** table."
 
-        # Generate LLM response for the operation
-        llm_response = generate_llm_response(content, action, tool, user_query)
-
-        # st.markdown(
-        # f"""
-        # <div class="chat-row left">
-        #     <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
-        #     <div class="chat-bubble agent-msg agent-bubble">{llm_response}</div>
-        # </div>
-        # """, unsafe_allow_html=True
-        # )
-
-        if action in {"create", "update", "delete"}:
-            result_msg = content.get("result", "")
-            if "✅" in result_msg or "success" in result_msg.lower():
-                st.success(result_msg)
-            elif "❌" in result_msg or "fail" in result_msg.lower() or "error" in result_msg.lower():
-                st.error(result_msg)
-            else:
-                st.info(result_msg)
-            try:
-                st.markdown("#### Here's the updated table after your operation:")
-                read_tool = tool
-                read_args = {}
-                updated_table = call_mcp_tool(read_tool, "read", read_args)
-                if isinstance(updated_table, dict) and "result" in updated_table:
-                    updated_df = pd.DataFrame(updated_table["result"])
-                    st.table(updated_df)
-            except Exception as fetch_err:
-                st.info(f"Could not retrieve updated table: {fetch_err}")
-
-        if action == "read" and isinstance(content["result"], list):
-            st.markdown("#### Here's the current table:")
-            df = pd.DataFrame(content["result"])
-            st.table(df)
-            # Check if this is ETL formatted data by looking for specific formatting
-            if tool == "sales_crud" and len(df.columns) > 0:
-                # Check for different ETL formats based on column names
-                if "sale_summary" in df.columns:
-                    st.info("📊 Data formatted with String Concatenation - Combined fields for readability")
-                elif "sale_date" in df.columns and isinstance(df["sale_date"].iloc[0] if len(df) > 0 else None,
-                                                            str):
-                    st.info("📅 Data formatted with Data Format Conversion - Dates converted to string format")
-                elif any(
-                    "." in str(val) and len(str(val).split(".")[-1]) == 2 for val in df.get("unit_price", []) if
-                    pd.notna(val)):
-                    st.info("💰 Data formatted with Decimal Value Formatting - Prices formatted to 2 decimal places")
-                else:
-                    st.markdown(f"The table contains {len(df)} sales records with cross-database information.")
-            elif tool == "sqlserver_crud":
-                st.markdown(
-                f"The table contains {len(df)} customers with their respective IDs, names, emails, and creation timestamps."
-            )
-            elif tool == "postgresql_crud":
-                st.markdown(
-                f"The table contains {len(df)} products with their respective IDs, names, prices, and descriptions."
-            )
-            else:
-                st.markdown(f"The table contains {len(df)} records.")
-        elif action == "describe" and isinstance(content['result'], list):
-            st.markdown("#### Table Schema: ")
-            df = pd.DataFrame(content['result'])
-            st.table(df)
-            st.markdown(
-            "This shows the column names, data types, nullability, and maximum length for each column in the table.")
-    else:
         st.markdown(
-        f"""
-        <div class="chat-row left">
-            <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
-            <div class="chat-bubble agent-msg agent-bubble">{msg['content']}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+            f"""
+            <div class="chat-row left">
+                <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
+                <div class="chat-bubble agent-msg agent-bubble">{summary_message}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
+        # Use an expander to show the technical details
+        with st.expander("Show Details"):
+            st.markdown("##### 💬 User Query")
+            st.text(user_query)
+            st.markdown("##### ⚙️ Generated SQL")
+            st.code(sql_query, language="sql")
+            st.markdown("##### 📥 Raw Server Response")
+            st.json(content)
+
+        # If there was an error, display it clearly
+        if error:
+            st.error(f"🚨 **Error:** {error}")
+        # If we have data, display it in a table
+        elif result_rows and isinstance(result_rows, list):
+            st.markdown("#### Query Results")
+            df = pd.DataFrame(result_rows)
+            st.dataframe(df)
+
+    else:
+        # Fallback for simple text messages (like errors from the client)
+        st.markdown(
+            f"""
+            <div class="chat-row left">
+                <img src="{agent_avatar_url}" class="avatar agent-avatar" alt="Agent">
+                <div class="chat-bubble agent-msg agent-bubble">{msg['content']}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 # ========== MAIN ==========
 if application == "MCP Application":
-    # ========== FLOATING TOOL MENU ==========
-    st.markdown('<div class="tool-menu">', unsafe_allow_html=True)
-    st.markdown('<div class="server-title">MultiDBCRUD</div>', unsafe_allow_html=True)
-    tool_label = "Tools" + (" ▼" if st.session_state["menu_expanded"] else " ▶")
-    if st.button(tool_label, key="expand_tools", help="Show tools", use_container_width=True):
-        st.session_state["menu_expanded"] = not st.session_state["menu_expanded"]
-    if st.session_state["menu_expanded"]:
-        st.markdown('<div class="expandable">', unsafe_allow_html=True)
-        for tool in st.session_state.tool_states.keys():
-            enabled = st.session_state.tool_states[tool]
-            new_val = st.toggle(tool, value=enabled, key=f"tool_toggle_{tool}")
-            st.session_state.tool_states[tool] = new_val
-        st.markdown('</div>', unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-
+    
     user_avatar_url = "https://cdn-icons-png.flaticon.com/512/1946/1946429.png"
     agent_avatar_url = "https://cdn-icons-png.flaticon.com/512/4712/4712039.png"
 
@@ -1574,7 +1150,7 @@ if application == "MCP Application":
 
     # ========== 1. REFACTORED CHAT MESSAGE RENDERING LOOP ==========
     st.markdown('<div class="stChatPaddingBottom">', unsafe_allow_html=True)
-    for msg in st.session_state.messages:
+    for msg_index, msg in enumerate(st.session_state.messages):
         # --- Render User Messages ---
         if msg["role"] == "user":
             st.markdown(
@@ -1600,67 +1176,64 @@ if application == "MCP Application":
                     render_assistant_message_content(msg)
 
                 with viz_col:
-                    viz_html, viz_code, viz_query = st.session_state.visualizations[viz_index]
-                    st.markdown(f"##### 📊 Visualization for: *{viz_query}*")
-                    for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
-                        with st.expander(
-                            f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=False):
-                        # Create tabs with Code first, then Visualization
-                            tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
-                            with tab1:
-                
-                                st.markdown("**Generated Code**")
-                                with st.container(height=800):
-                            # Initialize streaming state for this visualization if not exists
-                                    stream_key = f"stream_complete_{i}"
-                                    if stream_key not in st.session_state:
-                                        st.session_state[stream_key] = False
-                                # Create placeholder for streaming effect
-                                    code_placeholder = st.empty()
-                                    if not st.session_state[stream_key]:
-                                    # Streaming effect - show code character by character
-                                        import time
-                                    # Show streaming indicator first
-                                        with code_placeholder.container():
-                                            st.info("🔄 Generating code...")
-                                    # Small delay to show the loading message
-                                        time.sleep(0.5)
-                                    # Stream the code
-                                        streamed_code = ""
-                                        for j, char in enumerate(viz_code):
-                                            streamed_code += char
-                                        # Update every 5-10 characters for better performance
-                                            if j % 8 == 0 or j == len(viz_code) - 1:
-                                                code_placeholder.code(streamed_code, language="html")
-                                                time.sleep(0.03)  # Adjust speed as needed
-                                    # Mark streaming as complete
-                                        st.session_state[stream_key] = True
-                                    # Force a rerun to show the complete state
-                                        st.rerun()
-                                    else:
-                                    # Show complete code immediately
-                                        code_placeholder.code(viz_code, language="html")
-                                # Adding copy button (only show when streaming is complete)
-                                    if st.session_state[stream_key]:
-                                        if st.button("📋 Copy Code", key=f"copy_{i}"):
-                                            st.session_state.copied_code = viz_code
-                                            st.success("Code copied to clipboard!")
-                                    # Add reset streaming button for demo purposes
-                                        if st.button("🔄 Replay Code Generation", key=f"replay_{i}"):
+                    cola,colb=st.columns([0.05,0.95])
+                    with colb:
+                        viz_html, viz_code, viz_query = st.session_state.visualizations[viz_index]
+                        st.markdown(f"##### 📊 Visualization for: *{viz_query}*")
+                        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
+                            with st.expander(
+                                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=False):
+                            # Create tabs with Code first, then Visualization
+                                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
+                                with tab1:
+                    
+                                    st.markdown("**Generated Code**")
+                                    with st.container(height=800):
+                                # Initialize streaming state for this visualization if not exists
+                                        stream_key = f"stream_complete_{i}"
+                                        if stream_key not in st.session_state:
                                             st.session_state[stream_key] = False
+                                    # Create placeholder for streaming effect
+                                        code_placeholder = st.empty()
+                                        if not st.session_state[stream_key]:
+                                        # Streaming effect - show code character by character
+                                            import time
+                                        # Show streaming indicator first
+                                            with code_placeholder.container():
+                                                st.info("🔄 Generating code...")
+                                        # Small delay to show the loading message
+                                            time.sleep(0.5)
+                                        # Stream the code
+                                            streamed_code = ""
+                                            for j, char in enumerate(viz_code):
+                                                streamed_code += char
+                                            # Update every 5-10 characters for better performance
+                                                if j % 8 == 0 or j == len(viz_code) - 1:
+                                                    code_placeholder.code(streamed_code, language="html")
+                                                    time.sleep(0.03)  # Adjust speed as needed
+                                        # Mark streaming as complete
+                                            st.session_state[stream_key] = True
+                                        # Force a rerun to show the complete state
                                             st.rerun()
-                            with tab2:
-                                st.markdown("**Interactive Visualization**")
-                                # Use a container with fixed height
-                                with st.container():
-                                    components.html(viz_code, height=800, scrolling=True)
-                    if st.button("🧹 Clear All Visualizations", key="clear_viz"):
-                        st.session_state.visualizations = []
-                    # Clear all streaming states
-                        keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
-                        for key in keys_to_remove:
-                            del st.session_state[key]
-                        st.rerun()
+                                        else:
+                                        # Show complete code immediately
+                                            code_placeholder.code(viz_code, language="html")
+                                    # Adding copy button (only show when streaming is complete)
+                                        if st.session_state[stream_key]:
+                                            if st.button("📋 Copy Code", key=f"copy_{msg_index}_{i}"):
+                                                st.session_state.copied_code = viz_code
+                                                st.success("Code copied to clipboard!")
+                                        # Add reset streaming button for demo purposes
+                                            if st.button("🔄 Replay Code Generation", key=f"replay_{msg_index}_{i}"):
+                                                st.session_state[stream_key] = False
+                                                st.rerun()
+                                with tab2:
+                                    st.markdown("**Interactive Visualization**")
+                                    # Use a container with fixed height
+                                    with st.container():
+                                        components.html(viz_code, height=800, scrolling=True)
+                                
+                                          
 
 
                     
@@ -1670,8 +1243,17 @@ if application == "MCP Application":
                 render_assistant_message_content(msg)
 
 
-    st.markdown('</div>', unsafe_allow_html=True)  # End stChatPaddingBottom
-
+    st.markdown('</div>', unsafe_allow_html=True)
+    if st.session_state.visualizations:
+        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
+            st.session_state.visualizations = []
+            # Clear all streaming states
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
+            for key in keys_to_remove:
+                del st.session_state[key]
+            st.rerun() 
+    
+    
 
     # ========== 3. CLAUDE-STYLE STICKY CHAT BAR ==========
     
@@ -1696,20 +1278,15 @@ if application == "MCP Application":
         with chatbar_cols[2]:
             send_clicked = st.form_submit_button("➤", use_container_width=True)
     
-    # MODIFIED: Visualization option is now just a manual override
-    visualization_option = st.selectbox(
-        "Manually request a visualization?",
-        ("No", "Yes"),
-        key="visualization_select_key"
-    )
+   
     
     st.markdown('</div></div>', unsafe_allow_html=True)
     
-    if st.session_state.available_tools:
-        st.info(
-            f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
-    else:
-        st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
+    # if st.session_state.available_tools:
+    #     st.info(
+    #         f"🔧 Discovered {len(st.session_state.available_tools)} tools: {', '.join(st.session_state.available_tools.keys())}")
+    # else:
+    #     st.warning("⚠️ No tools discovered. Please check your MCP server connection.")
     
     # ========== HANDLE HAMBURGER ==========
     if hamburger_clicked:
@@ -1717,157 +1294,84 @@ if application == "MCP Application":
         st.rerun()
 
     # ========== PROCESS CHAT INPUT ==========
+    
     if user_query_input and send_clicked:
         user_query = user_query_input
-        user_steps = []
+        
+        # The 'try' block starts here and wraps all operations
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
             if not enabled_tools:
                 raise Exception("No tools are enabled. Please enable at least one tool in the menu.")
 
+            # 1. Parse the user's query to get the tool and SQL
             p = parse_user_query(user_query, st.session_state.available_tools)
             tool = p.get("tool")
+            sql_query = p.get("sql")
+
+            if not tool or not sql_query:
+                raise Exception("LLM failed to generate a valid tool or SQL query.")
+            
             if tool not in enabled_tools:
                 raise Exception(f"Tool '{tool}' is disabled. Please enable it in the menu.")
             if tool not in st.session_state.available_tools:
                 raise Exception(
                     f"Tool '{tool}' is not available. Available tools: {', '.join(st.session_state.available_tools.keys())}")
 
-            action = p.get("action")
-            args = p.get("args", {})
+            # 2. Call the tool with the generated SQL
+            raw = call_mcp_tool(tool, sql_query)
 
-            # VALIDATE AND CLEAN PARAMETERS
-            args = validate_and_clean_parameters(tool, args)
-            args = normalize_args(args)
-            p["args"] = args
-
-            # ========== ENHANCED NAME-BASED RESOLUTION ==========
-        
-            # For SQL Server (customers) operations
-            if tool == "sqlserver_crud":
-                if action in ["update", "delete"] and "name" in args and "customer_id" not in args:
-                    # First, try to find the customer by name
-                    name_to_find = args["name"]
-                    try:
-                        # Search for customer by name
-                        read_result = call_mcp_tool(tool, "read", {})
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            customers = read_result["result"]
-                            # Try exact match first
-                            exact_matches = [c for c in customers if c.get("Name", "").lower() == name_to_find.lower()]
-                            if exact_matches:
-                                args["customer_id"] = exact_matches[0]["Id"]
-                            else:
-                                # Try partial matches (first name or last name)
-                                partial_matches = [c for c in customers if 
-                                name_to_find.lower() in c.get("Name", "").lower() or
-                                name_to_find.lower() in c.get("FirstName", "").lower() or 
-                                name_to_find.lower() in c.get("LastName", "").lower()]
-                                if partial_matches:
-                                    args["customer_id"] = partial_matches[0]["Id"]
-                                else:
-                                    raise Exception(f"❌ Customer '{name_to_find}' not found")
-                    except Exception as e:
-                        if "not found" in str(e):
-                            raise e
-                        else:
-                            raise Exception(f"❌ Error finding customer '{name_to_find}': {str(e)}")
-
-                # Extract new email for updates
-                if action == "update" and "new_email" not in args:
-                    possible_email = extract_email(user_query)
-                    if possible_email:
-                        args["new_email"] = possible_email
-
-            # For PostgreSQL (products) operations  
-            elif tool == "postgresql_crud":
-                if action in ["update", "delete"] and "name" in args and "product_id" not in args:
-                    # First, try to find the product by name
-                    name_to_find = args["name"]
-                    try:
-                        # Search for product by name
-                        read_result = call_mcp_tool(tool, "read", {})
-                        if isinstance(read_result, dict) and "result" in read_result:
-                            products = read_result["result"]
-                            # Try exact match first
-                            exact_matches = [p for p in products if p.get("name", "").lower() == name_to_find.lower()]
-                            if exact_matches:
-                                args["product_id"] = exact_matches[0]["id"]
-                            else:
-                                # Try partial matches
-                                partial_matches = [p for p in products if name_to_find.lower() in p.get("name", "").lower()]
-                                if partial_matches:
-                                    args["product_id"] = partial_matches[0]["id"]
-                                else:
-                                    raise Exception(f"❌ Product '{name_to_find}' not found")
-                    except Exception as e:
-                        if "not found" in str(e):
-                            raise e
-                        else:
-                            raise Exception(f"❌ Error finding product '{name_to_find}': {str(e)}")
-
-                # Extract new price for updates
-                if action == "update" and "new_price" not in args:
-                    possible_price = extract_price(user_query)
-                    if possible_price is not None:
-                        args['new_price'] = possible_price
-
-            # Update the parsed args
-            p["args"] = args
-
-            # Handle describe operations
-            if action == "describe" and "table_name" in args:
-                if tool == "sqlserver_crud" and args["table_name"].lower() in ["customer", "customer table"]:
-                    args["table_name"] = "Customers"
-                if tool == "postgresql_crud" and args["table_name"].lower() in ["product", "product table"]:
-                    args["table_name"] = "products"
-
-            raw = call_mcp_tool(p["tool"], p["action"], p.get("args", {}))
-
-            # --- MODIFIED VISUALIZATION LOGIC ---
-            # 1. Detect intent from query and check manual override
-            visualization_intent = detect_visualization_intent(user_query)
-            should_generate_viz = (visualization_intent == "Yes" or visualization_option == "Yes")
-            
-            # 2. Extract data for visualization
-            viz_data = raw.get("result", raw) if isinstance(raw, dict) else raw
-            
-            # 3. Prepare the main assistant message dictionary
+            # 3. Prepare the response message for the chat history
             assistant_message = {
                 "role": "assistant",
-                "content": raw if (isinstance(raw, dict) and "sql" in raw) else format_natural(raw),
-                "format": "sql_crud" if (isinstance(raw, dict) and "sql" in raw) else "text",
+                "content": raw,
+                "format": "sql_crud",
                 "request": p,
                 "tool": tool,
-                "action": action,
-                "args": args,
                 "user_query": user_query,
             }
 
-            # 4. Generate visualization if conditions are met
-            if action == "read" and viz_data and isinstance(viz_data, list) and len(viz_data) > 0 and should_generate_viz:
+            # 4. Check for and generate visualization if needed
+            visualization_intent = detect_visualization_intent(user_query)
+            should_generate_viz = (visualization_intent == "Yes" )
+            
+            viz_data = raw.get("rows", raw) if isinstance(raw, dict) else raw
+
+            if viz_data and isinstance(viz_data, list) and len(viz_data) > 0 and should_generate_viz:
                 with st.spinner("🎨 Generating visualization..."):
                     viz_code, viz_html = generate_visualization(viz_data, user_query, tool)
                     
-                    # Add to visualization list and link it to the message
                     if "visualizations" not in st.session_state:
                         st.session_state.visualizations = []
                     
                     st.session_state.visualizations.append((viz_html, viz_code, user_query))
-                    # This index links the message to its specific visualization for split-screen rendering
                     assistant_message["visualization_index"] = len(st.session_state.visualizations) - 1
                     st.success("Visualization generated successfully!")
 
+        # The 'except' block correctly catches any failure from the 'try' block
         except Exception as e:
-            # Append user query and error message to chat
+            # Append user query and the error message to chat
             st.session_state.messages.append({"role": "user", "content": user_query, "format": "text"})
             st.session_state.messages.append({"role": "assistant", "content": f"⚠️ Error: {e}", "format": "text"})
+        
+        # The 'else' block runs ONLY if the 'try' block was successful
         else:
-            # Append user query and successful assistant message to chat
+            # Append user query and the successful assistant message to chat
             st.session_state.messages.append({"role": "user", "content": user_query, "format": "text"})
             st.session_state.messages.append(assistant_message)
         
+        # Rerun the app to display the new messages
         st.rerun()
+
+        # --- MODIFIED VISUALIZATION LOGIC ---
+        # ... (the rest of the script continues)
+
+            # --- MODIFIED VISUALIZATION LOGIC ---
+            # 1. Detect intent from query and check manual override
+            
+
+        # 4. Generate visualization if conditions are met (removed "action == 'read'")
+            
 
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
