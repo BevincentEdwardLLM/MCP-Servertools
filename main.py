@@ -3,8 +3,8 @@
 from fastmcp import FastMCP
 
 from google.cloud import bigquery
-import os
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"D:\MCP_NEW\service_account.json"
+# import os
+# os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = r"D:\MCP_NEW\service_account.json"
 
 # === Create an MCP server ===
 mcp = FastMCP("CustomerProductSalesMCP")
