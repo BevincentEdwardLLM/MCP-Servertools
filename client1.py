@@ -14,7 +14,10 @@ import json
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+import requests
 
+
+# Load environment variables
 load_dotenv()
 
 # Initialize OpenAI client with environment variable
@@ -26,7 +29,7 @@ if not OPENAI_API_KEY:
 
 llm_client = ChatOpenAI(
     openai_api_key=OPENAI_API_KEY,
-    model_name=os.environ.get("OPENAI_MODEL", "gpt-4o") # Using gpt-4o as a modern default
+    model=os.environ.get("OPENAI_MODEL", "gpt-4o") # Using gpt-4o as a modern default
 )
 
 
@@ -42,7 +45,6 @@ else:
 st.set_page_config(page_title="MCP CRUD Chat", layout="wide")
 
 # ========== GLOBAL CSS ==========
-# NOTE: All CSS from the original prompt is included here for completeness.
 st.markdown("""
     <style>
     [data-testid="stSidebar"] {
@@ -328,7 +330,6 @@ async def _discover_tools() -> dict:
         return {}
 
 
-
 def discover_tools() -> dict:
     """Synchronous wrapper for tool discovery"""
     return asyncio.run(_discover_tools())
@@ -367,13 +368,13 @@ with st.sidebar:
         # Dynamically choose default options for other selects
         # Option lists
         protocol_options = ["", "MCP Protocol", "A2A Protocol"]
-        llm_options = ["", "Groq Llama3-70B", "Groq Llama3-8B", "Groq Mixtral-8x7B", "Groq Gemma"]
+        llm_options = ["", "OpenAI gpt-4o", "OpenAI gpt-4-turbo", "Anthropic claude-3-5-sonnet-20240620"]
 
         # Logic to auto-select defaults if MCP Application is chosen
         protocol_index = protocol_options.index(
             "MCP Protocol") if application == "MCP Application" else protocol_options.index(
             st.session_state.get("protocol_select", ""))
-        llm_index = llm_options.index("Groq Llama3-70B") if application == "MCP Application" else llm_options.index(
+        llm_index = llm_options.index("OpenAI gpt-4o") if application == "MCP Application" else llm_options.index(
             st.session_state.get("llm_select", ""))
 
         protocol = st.selectbox(
@@ -511,8 +512,6 @@ def _clean_json(raw: str) -> str:
     return json_match.group(0).strip() if json_match else raw.strip()
 
 
-
-import requests
 def call_mcp_tool(tool_name: str, operation: str, args: dict) -> dict:
     """
     Synchronous helper that calls the MCP server REST endpoint for a tool.
@@ -672,7 +671,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
     system_prompt = """
     You are a JavaScript dashboard designer and visualization expert.
 
-⚡ ALWAYS generate a FULL, self-contained HTML document with:
+⚡ ALWAYS!!! generate a FULL, self-contained HTML document with:
 - <!DOCTYPE html>, <html>, <head>, <body>, and </html> tags included.
 - <style> for modern responsive CSS (gradient backgrounds, glassmorphism cards, shadows, rounded corners).
 - <script> with all JavaScript logic inline (no external JS files except Chart.js).
@@ -731,12 +730,9 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         ) as stream:
             for event in stream:
                 if event.type == "content.delta":
-                    # code_accum+=event.delta
                     token = event.delta
                     code_accum += token
-                    # live preview (partial typing effect)
-                    # placeholder.code(code_accum,language='html')
-
+                    
             final_message = stream.get_final_message()
             visualization_code = "".join(
                 block.text for block in final_message.content if block.type == "text"
@@ -846,8 +842,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-
-
 def parse_user_query(query: str, available_tools: dict) -> dict:
     """
     Takes a natural language query and uses an LLM to generate a JSON object
@@ -861,30 +855,58 @@ def parse_user_query(query: str, available_tools: dict) -> dict:
         [f"- **{name}**: {desc}" for name, desc in available_tools.items()]
     )
 
+    # --- UPDATED PROMPT FOR OPENAI CONSISTENCY ---
+    # New System Prompt
+    # New System Prompt with Updated Examples
     system_prompt = f"""
-You are an expert Google BigQuery SQL writer. Your goal is to convert a user's natural language question into a single, valid BigQuery SQL query.
+You are an expert Google BigQuery SQL writer. Your sole function is to act as a deterministic translator.
+Your task is to convert a user's natural language request into a single, valid JSON object.
+This JSON object MUST contain two keys:
+1.  **"tool"**: The exact name of the tool from the list below.
+2.  **"sql"**: A valid, complete, and syntactically correct BigQuery SQL query.
 
-**RULES:**
-1.  You will be given a list of available tools. Each tool corresponds to one or more tables in BigQuery.
-2.  Analyze the user's query to determine which tool and table(s) are most relevant.
-3.  You MUST use the full, exact table names provided in the tool descriptions (e.g., `genai-poc-424806.MCP_demo.Customer`). Do not shorten them.
-4.  Your response MUST be a single JSON object with two keys: "tool" and "sql".
-5.  The "tool" value must be the name of the most appropriate tool to use.
-6.  The "sql" value must be the complete, syntactically correct BigQuery SQL query.
+**STRICT RULES:**
+* **DO NOT** generate any prose, explanations, or text outside the JSON object. Your entire response must be the JSON.
+* The `sql` query MUST use the full, exact table names as specified in the tool descriptions (e.g., `genai-poc-424806.MCP_demo.CarData`).
+* The `tool` value MUST be one of the exact tool names provided.
 
-**AVAILABLE TOOLS AND THEIR TABLES:**
+**AVAILABLE TOOLS AND THEIR DESCRIPTIONS:**
 {tool_descriptions}
 
-**EXAMPLE USER QUERY:** "Show me all feedback for product 101 from the oracle source"
+**EXAMPLES:**
+1.  User Query: "Show me all records from the BigQuery CarData table."
+    JSON Output:
+    {{
+      "tool": "BigQuery_CarData",
+      "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.CarData`"
+    }}
+2.  User Query: "Find all customer feedback records for product 101."
+    JSON Output:
+    {{
+      "tool": "Oracle_CustomerFeedback",
+      "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.CustomerFeedback` WHERE product_id = '101'"
+    }}
+3.  User Query: "How many users are registered?"
+    JSON Output:
+    {{
+      "tool": "tool_Users",
+      "sql": "SELECT COUNT(*) FROM `genai-poc-424806.MCP_demo.Users`"
+    }}
+4.  User Query: "List the top 5 highest-priced cars."
+    JSON Output:
+    {{
+      "tool": "BigQuery_CarData",
+      "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.CarData` ORDER BY price DESC LIMIT 5"
+    }}
+5.  User Query: "Give me the first 20 records from the Youth Health Records."
+    JSON Output:
+    {{
+      "tool": "Bigquery_YouthHealthRecords",
+      "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.YouthHealthRecords` LIMIT 20"
+    }}
 
-**EXAMPLE RESPONSE:**
-{{
-  "tool": "Oracle_CustomerFeedback",
-  "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.CustomerFeedback` WHERE ProductID = 101"
-}}
-
-Now, analyze the user's query and generate the correct JSON response.
-"""
+Now, for the user's query, generate ONLY the JSON response. """
+    # --- END OF UPDATED PROMPT ---
 
     user_prompt = f'User query: "{query}"'
 
@@ -1019,35 +1041,31 @@ def extract_price(text):
     return None
 
 
-def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str) -> str:
-    """Generate LLM-based table description from JSON response data"""
+# Updated generate_table_description function
+def generate_table_description(df: pd.DataFrame, content: dict, action: str, tool: str, user_query: str) -> str:
+    """Generate a simple, direct confirmation message for a successful query."""
 
-    # Sample first few rows for context (don't send all data to LLM)
-    sample_data = df.head(3).to_dict('records') if len(df) > 0 else []
+    # Get the number of records from the DataFrame
+    record_count = len(df)
 
-    # Create context for LLM
-    context = {
-        "action": action,
-        "tool": tool,
-        "record_count": len(df),
-        "columns": list(df.columns) if len(df) > 0 else [],
-        "sample_data": sample_data,
-        "full_response": content.get("result", [])[:3] if isinstance(content.get("result"), list) else content.get(
-            "result", "")
-    }
-
+    # --- REVISED SYSTEM PROMPT ---
     system_prompt = (
-        "You are a data analyst. Generate a brief, insightful 1-line description "
-        "of the table data based on the JSON response. Focus on what the data represents "
-        "and any interesting patterns you notice. Be concise and business-focused."
+        "You are a helpful and efficient database assistant. Your sole purpose is "
+        "to confirm a user's request in a single, friendly sentence. "
+        "The response must include the number of records retrieved and confirm that the data has been provided. "
+        "Do not provide any analysis, insights, or technical details."
     )
+    # --- END REVISED SYSTEM PROMPT ---
 
     user_prompt = f"""
-    Analyze this table data and generate a single insightful line about it:
+    The user asked: "{user_query}"
+    The query successfully retrieved {record_count} records.
+    The data is from the "{tool}" tool.
 
-    Context: {json.dumps(context, indent=2)}
+    Please generate a single, friendly, and simple confirmation message.
 
-    Generate one line describing what this data represents and any key insights.
+    Example: "Sure, here is the car data you requested. It contains 321 records."
+    Example: "The records for user 'chen.wei' are here. We found 25 matching entries for you."
     """
 
     try:
@@ -1058,7 +1076,8 @@ def generate_table_description(df: pd.DataFrame, content: dict, action: str, too
         response = llm_client.invoke(messages)
         return response.content.strip()
     except Exception as e:
-        return f"Retrieved {len(df)} records from the database."
+        # Fallback to a simple message if the LLM call fails
+        return f"Successfully retrieved {record_count} records from the database."
 
 
 # ========== NEW HELPER FUNCTION: RENDER ASSISTANT MESSAGE CONTENT ==========
@@ -1085,7 +1104,7 @@ def render_assistant_message_content(msg: dict):
         error = content.get("error")
 
         # Display a conversational summary message
-        summary_message = f"I ran the query against the **{table_name}** table and found **{row_count}** results for you."
+        summary_message = msg.get("description", f"I ran the query against the **{table_name}** table and found **{row_count}** results for you.")
         if error:
             summary_message = f"I encountered an error trying to query the **{table_name}** table."
 
@@ -1142,8 +1161,8 @@ if application == "MCP Application":
     if not st.session_state.available_tools:
         with st.spinner("Discovering available tools..."):
             discovered_tools = discover_tools()
-            st.session_state.available_tools = discovered_tools
-            st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
+        st.session_state.available_tools = discovered_tools
+        st.session_state.tool_states = {tool: True for tool in discovered_tools.keys()}
 
     # Generate dynamic tool descriptions
     TOOL_DESCRIPTIONS = generate_tool_descriptions(st.session_state.available_tools)
@@ -1179,79 +1198,72 @@ if application == "MCP Application":
                     cola,colb=st.columns([0.05,0.95])
                     with colb:
                         viz_html, viz_code, viz_query = st.session_state.visualizations[viz_index]
-                        st.markdown(f"##### 📊 Visualization for: *{viz_query}*")
-                        for i, (viz_html, viz_code, user_query) in enumerate(st.session_state.visualizations):
-                            with st.expander(
-                                f"Visualization: {user_query[:50]}..." if len(user_query) > 50 else f"Visualization: {user_query}",expanded=False):
+                        with st.expander(
+                            f"Visualization: {viz_query[:50]}..." if len(viz_query) > 50 else f"Visualization: {viz_query}",
+                            expanded=False):
                             # Create tabs with Code first, then Visualization
-                                tab1, tab2 = st.tabs(["💻 Generated Code", "📊 Visualization"])
-                                with tab1:
-                    
-                                    st.markdown("**Generated Code**")
-                                    with st.container(height=800):
+                            tab1, tab2 = st.tabs(["Generated Code", "Visualization"])
+                            with tab1:
+                                st.markdown("**Generated Code**")
+                                with st.container(height=800):
                                 # Initialize streaming state for this visualization if not exists
-                                        stream_key = f"stream_complete_{i}"
-                                        if stream_key not in st.session_state:
-                                            st.session_state[stream_key] = False
+                                    stream_key = f"stream_complete_{msg_index}"
+                                    if stream_key not in st.session_state:
+                                        st.session_state[stream_key] = False
                                     # Create placeholder for streaming effect
-                                        code_placeholder = st.empty()
-                                        if not st.session_state[stream_key]:
-                                        # Streaming effect - show code character by character
-                                            import time
-                                        # Show streaming indicator first
-                                            with code_placeholder.container():
-                                                st.info("🔄 Generating code...")
+                                    code_placeholder = st.empty()
+                                    if not st.session_state[stream_key]:
+                                    # Streaming effect - show code character by character
+                                        import time
+                                    # Show streaming indicator first
+                                        with code_placeholder.container():
+                                            st.info("🔄 Generating code...")
                                         # Small delay to show the loading message
-                                            time.sleep(0.5)
-                                        # Stream the code
-                                            streamed_code = ""
-                                            for j, char in enumerate(viz_code):
-                                                streamed_code += char
-                                            # Update every 5-10 characters for better performance
-                                                if j % 8 == 0 or j == len(viz_code) - 1:
-                                                    code_placeholder.code(streamed_code, language="html")
-                                                    time.sleep(0.03)  # Adjust speed as needed
-                                        # Mark streaming as complete
-                                            st.session_state[stream_key] = True
-                                        # Force a rerun to show the complete state
-                                            st.rerun()
-                                        else:
-                                        # Show complete code immediately
-                                            code_placeholder.code(viz_code, language="html")
+                                        time.sleep(0.5)
+                                    # Stream the code
+                                        streamed_code = ""
+                                        for j, char in enumerate(viz_code):
+                                            streamed_code += char
+                                        # Update every 5-10 characters for better performance
+                                            if j % 8 == 0 or j == len(viz_code) - 1:
+                                                code_placeholder.code(streamed_code, language="html")
+                                                time.sleep(0.03)  # Adjust speed as needed
+                                    # Mark streaming as complete
+                                        st.session_state[stream_key] = True
+                                    # Force a rerun to show the complete state
+                                        st.rerun()
+                                    else:
+                                    # Show complete code immediately
+                                        code_placeholder.code(viz_code, language="html")
                                     # Adding copy button (only show when streaming is complete)
-                                        if st.session_state[stream_key]:
-                                            if st.button("📋 Copy Code", key=f"copy_{msg_index}_{i}"):
-                                                st.session_state.copied_code = viz_code
-                                                st.success("Code copied to clipboard!")
-                                        # Add reset streaming button for demo purposes
-                                            if st.button("🔄 Replay Code Generation", key=f"replay_{msg_index}_{i}"):
-                                                st.session_state[stream_key] = False
-                                                st.rerun()
-                                with tab2:
-                                    st.markdown("**Interactive Visualization**")
-                                    # Use a container with fixed height
-                                    with st.container():
-                                        components.html(viz_code, height=800, scrolling=True)
+                                    if st.session_state[stream_key]:
+                                        if st.button("Copy Code", key=f"copy_{msg_index}"):
+                                            st.session_state.copied_code = viz_code
+                                            st.success("Code copied to clipboard!")
+                                        if st.button("Replay Generation", key=f"replay_{msg_index}"):
+                                            st.session_state[stream_key] = False
+                                            st.rerun()
+                            with tab2:
+                                st.markdown("**Interactive Visualization**")
+                                # Use a container with fixed height
+                                with st.container():
+                                    components.html(viz_code, height=800, scrolling=True)
+                                if st.session_state.visualizations:
+                                    if st.button("Clear Visualizations", key=f"clear_viz_{msg_index}"):
+                                        st.session_state.visualizations = []
+                                        keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
+                                        for key in keys_to_remove:
+                                            del st.session_state[key]
+                                        st.rerun()
                                 
-                                          
-
-
-                    
-
+                                    
             else:
                 # --- Render a normal, full-width assistant message ---
                 render_assistant_message_content(msg)
 
 
     st.markdown('</div>', unsafe_allow_html=True)
-    if st.session_state.visualizations:
-        if st.button("🧹 Clear All Visualizations", key="clear_viz"):
-            st.session_state.visualizations = []
-            # Clear all streaming states
-            keys_to_remove = [key for key in st.session_state.keys() if key.startswith("stream_complete_")]
-            for key in keys_to_remove:
-                del st.session_state[key]
-            st.rerun() 
+   
     
     
 
@@ -1278,7 +1290,7 @@ if application == "MCP Application":
         with chatbar_cols[2]:
             send_clicked = st.form_submit_button("➤", use_container_width=True)
     
-   
+    
     
     st.markdown('</div></div>', unsafe_allow_html=True)
     
@@ -1297,7 +1309,23 @@ if application == "MCP Application":
     
     if user_query_input and send_clicked:
         user_query = user_query_input
-        
+
+        # --- NEW LOGIC: DIRECTLY HANDLE META-QUERIES ABOUT TOOLS ---
+        if "list" in user_query.lower() and "tools" in user_query.lower():
+            st.session_state.messages.append({"role": "user", "content": user_query, "format": "text"})
+            
+            tools_list = st.session_state.get("available_tools")
+            if tools_list:
+                formatted_list = "Here are the available tools:\n\n"
+                for name, desc in tools_list.items():
+                    formatted_list += f"- **{name}**\n"
+                assistant_response = formatted_list
+            else:
+                assistant_response = "I'm sorry, no tools are currently available. Please check the MCP server connection."
+            
+            st.session_state.messages.append({"role": "assistant", "content": assistant_response, "format": "text"})
+            st.rerun()
+
         # The 'try' block starts here and wraps all operations
         try:
             enabled_tools = [k for k, v in st.session_state.tool_states.items() if v]
@@ -1322,6 +1350,7 @@ if application == "MCP Application":
             raw = call_mcp_tool(tool, sql_query)
 
             # 3. Prepare the response message for the chat history
+            
             assistant_message = {
                 "role": "assistant",
                 "content": raw,
@@ -1330,6 +1359,16 @@ if application == "MCP Application":
                 "tool": tool,
                 "user_query": user_query,
             }
+
+            # --- NEW LOGIC: Dynamically generate a table description ---
+            if p.get("sql", "").lower().strip().startswith("select") and raw.get("rows", []):
+                df = pd.DataFrame(raw["rows"])
+                try:
+                    # Check this line carefully!
+                    table_description = generate_table_description(df, raw, "read", tool, user_query)
+                    assistant_message["description"] = table_description
+                except Exception as e:
+                    assistant_message["description"] = f"Retrieved {len(df)} records from the database."
 
             # 4. Check for and generate visualization if needed
             visualization_intent = detect_visualization_intent(user_query)
@@ -1362,17 +1401,6 @@ if application == "MCP Application":
         
         # Rerun the app to display the new messages
         st.rerun()
-
-        # --- MODIFIED VISUALIZATION LOGIC ---
-        # ... (the rest of the script continues)
-
-            # --- MODIFIED VISUALIZATION LOGIC ---
-            # 1. Detect intent from query and check manual override
-            
-
-        # 4. Generate visualization if conditions are met (removed "action == 'read'")
-            
-
 
     # ========== 4. AUTO-SCROLL TO BOTTOM ==========
     components.html("""

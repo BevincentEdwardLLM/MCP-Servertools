@@ -309,26 +309,27 @@ def tool_soc_alerts(sql: str) -> dict:
 # 10).User Details 
 # -----------------------------------------------------------------------------
 @mcp.tool(description="""
-Execute a SQL query on the BigQuery `users` table containing user profile and license information.
+Execute a SQL query on the BigQuery `oeis_users` table containing user profile and license information.
 
-**Schema:** `genai-poc-424806.vapi_ai_demo.users`
+**Schema:** `genai-poc-424806.vapi_ai_demo.oeis_users`
 - username (STRING)
 - password (STRING)
 - DL_id (STRING, driver's license ID)
 - Phone_No (STRING)
 - Address (STRING)
+-emp_id(STRING)
 
 Use this tool to:
 - Retrieve user credentials and contact details
 - Filter users by location, DL_id, or phone number
 - Join with other activity or ticket data by username
 
-**Example:** SELECT * FROM `genai-poc-424806.vapi_ai_demo.users` WHERE Address LIKE '%San Jose%'
+**Example:** SELECT * FROM `genai-poc-424806.vapi_ai_demo.oeis_users` WHERE Address LIKE '%San Jose%'
 """)
 def tool_Users(sql: str) -> dict:
     try:
         rows = run_bq(sql)
-        return {"table": "users", "row_count": len(rows), "rows": rows}
+        return {"table": "oeis_users", "row_count": len(rows), "rows": rows}
     except Exception as e:
         return {"error": str(e)}
 
