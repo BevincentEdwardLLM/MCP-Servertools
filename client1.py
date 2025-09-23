@@ -907,6 +907,12 @@ This JSON object MUST contain two keys:
       "tool": "Bigquery_YouthHealthRecords",
       "sql": "SELECT * FROM `genai-poc-424806.MCP_demo.YouthHealthRecords` LIMIT 20"
     }}
+6.  User Query: "List the critical tickets."
+    JSON Output:
+    {{
+      "tool": "tool_TicketDetails",
+      "sql": "SELECT * FROM `genai-poc-424806.vapi_ai_demo.servicenow_ticket_details` WHERE criticality = 'Critical'"
+    }}
 
 Now, for the user's query, generate ONLY the JSON response. """
     # --- END OF UPDATED PROMPT ---
