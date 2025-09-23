@@ -301,9 +301,9 @@ def detect_visualization_intent(query: str) -> str:
     This simulates a more complex semantic search.
     """
     visualization_keywords = [
-        "visualize", "chart", "graph", "plot", "dashboard", "trends",
+        "visualize", "chart", "graph", "plot", "dashboard","trend","trends",
         "distribution", "breakdown", "pie chart", "bar graph", "line chart",
-        "show me a report", "analytics for"
+        "show me a report", "analytics for", "visual", "visuals","Illustrate"
     ]
     query_lower = query.lower()
     for keyword in visualization_keywords:
@@ -425,13 +425,13 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-logo_path = "llm.png"
+logo_path = "servicenow.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
         f"""
         <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
-            <img src='data:image/png;base64,{logo_base64}' width='220'>
+            <img src='data:image/png;base64,{logo_base64}' width='400'>
         </div>
         """,
         unsafe_allow_html=True
@@ -452,14 +452,15 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management With Natural Language
+            Agentic AI Orchestration
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL 
+            Voice Agents Simplify User Interaction and Improve
+User Experience with ServiceNow 
         </span>
         <hr style="
         width: 80%;
@@ -713,7 +714,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
 - End ONLY with </html>.
     Generate a comprehensive visualization that helps understand the data.
     Focus on the most important insights from the query.
-    Make sure charts have fixed heights and don't overflow.
+    Make sure charts have fixed heights and don't overflow .
     """
 
     try:
@@ -723,7 +724,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
 
         # Stream response tokens from Anthropic
         with anthropic_client.messages.stream(
-            model="claude-3-7-sonnet-20250219",
+            model="claude-sonnet-4-20250514",
             max_tokens=6000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
@@ -743,6 +744,7 @@ def generate_visualization(data: any, user_query: str, tool: str) -> tuple:
         return visualization_code, visualization_code
 
     except Exception as e:
+        
         # Fallback to a simple table if visualization generation fails
         if isinstance(data, list) and len(data) > 0:
             fallback_code = f"""
@@ -837,6 +839,7 @@ st.markdown("""
     .visualization-container {
         height: 400px;
         overflow: auto;
+        max-width: 100% !important;
     }
     </style>
 """, unsafe_allow_html=True)
