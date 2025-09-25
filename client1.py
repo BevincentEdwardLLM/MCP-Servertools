@@ -425,13 +425,13 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-logo_path = "servicenow.png"
+logo_path = "llm.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
         f"""
         <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
-            <img src='data:image/png;base64,{logo_base64}' width='400'>
+            <img src='data:image/png;base64,{logo_base64}' width='300'>
         </div>
         """,
         unsafe_allow_html=True
@@ -452,15 +452,14 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            Agentic AI Orchestration
+            MCP-Driven Data Management With Natural Language
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Voice Agents Simplify User Interaction and Improve
-User Experience with ServiceNow 
+            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL  
         </span>
         <hr style="
         width: 80%;
@@ -912,6 +911,12 @@ This JSON object MUST contain two keys:
     {{
       "tool": "tool_TicketDetails",
       "sql": "SELECT * FROM `genai-poc-424806.vapi_ai_demo.servicenow_ticket_details` WHERE criticality = 'Critical'"
+    }}
+7.  User Query: "list the CT from Chennai Corporation"
+    JSON Output:
+    {{
+      "tool": "BigQuery_MSMEfinal",
+      "sql": "SELECT * FROM `genai-poc-424806.MSME.final_processed` WHERE `District` = 'Chennai' AND `CTorNon-CT` = 'CT'"
     }}
 
 Now, for the user's query, generate ONLY the JSON response. """
