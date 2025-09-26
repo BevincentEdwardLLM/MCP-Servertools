@@ -452,14 +452,15 @@ st.markdown(
             letter-spacing: -2px;
             color: #222;
         ">
-            MCP-Driven Data Management With Natural Language
+           Energy Efficiency Management
         </span>
         <span style="
             font-size: 1.15rem;
             color: #555;
             margin-top: 0.35rem;
         ">
-            Agentic Approach:  NO SQL, NO ETL, NO DATA WAREHOUSING, NO BI TOOL  
+            Operational Excellence with Machine Learning
+and Generative AI 
         </span>
         <hr style="
         width: 80%;
@@ -912,12 +913,16 @@ This JSON object MUST contain two keys:
       "tool": "tool_TicketDetails",
       "sql": "SELECT * FROM `genai-poc-424806.vapi_ai_demo.servicenow_ticket_details` WHERE criticality = 'Critical'"
     }}
-7.  User Query: "list the CT from Chennai Corporation"
+7.  User Query: "Show the total monthly consumption for all industries in the 'Chennai' district."
     JSON Output:
     {{
-      "tool": "BigQuery_MSMEfinal",
-      "sql": "SELECT * FROM `genai-poc-424806.MSME.final_processed` WHERE `District` = 'Chennai' AND `CTorNon-CT` = 'CT'"
-    }}
+  "tool": "BigQuery_MSME1",
+  "sql": "SELECT district, SUM(total_monthly_consumption) AS total_consumption FROM `genai-poc-424806.MSME.MSME_2023-25_Cleaned` WHERE district = 'Chennai' GROUP BY district"
+}}
+
+
+
+
 
 Now, for the user's query, generate ONLY the JSON response. """
     # --- END OF UPDATED PROMPT ---
