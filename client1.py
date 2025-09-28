@@ -358,24 +358,47 @@ def get_image_base64(img_path):
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>Solutions Scope</div>", unsafe_allow_html=True)
     with st.container():
-        # Application selectbox (with key)
+        # Application selectbox (The default index 0 is "Select Application")
         application = st.selectbox(
             "Select Application",
             ["Select Application", "MCP Application"],
             key="app_select"
         )
 
-        # Dynamically choose default options for other selects
-        # Option lists
-        protocol_options = ["", "MCP Protocol", "A2A Protocol"]
-        llm_options = ["", "OpenAI gpt-4o", "OpenAI gpt-4-turbo", "Anthropic claude-3-5-sonnet-20240620"]
+        # --- Options Lists ---
+        # FIX: Changed "" to meaningful placeholder text like "Select Protocol"
+        protocol_options = ["Select Protocol", "MCP Protocol", "A2A Protocol"] 
+        # FIX: Changed "" to meaningful placeholder text like "Select LLM"
+        llm_options = ["Select LLM", "OpenAI gpt-4o", "OpenAI gpt-4-turbo", "Anthropic claude-3-5-sonnet-20240620"]
 
-        # Logic to auto-select defaults if MCP Application is chosen
-        protocol_index = protocol_options.index(
-            "MCP Protocol") if application == "MCP Application" else protocol_options.index(
-            st.session_state.get("protocol_select", ""))
-        llm_index = llm_options.index("OpenAI gpt-4o") if application == "MCP Application" else llm_options.index(
-            st.session_state.get("llm_select", ""))
+        # --- Dynamic Index Logic ---
+
+        # 1. Determine the index for Protocol
+        if application == "MCP Application":
+            # Auto-select "MCP Protocol" (which is now index 1)
+            protocol_index = protocol_options.index("MCP Protocol")
+        else:
+            # Revert to or maintain session state, defaulting to the placeholder ("Select Protocol")
+            default_key = st.session_state.get("protocol_select", "Select Protocol")
+            try:
+                protocol_index = protocol_options.index(default_key)
+            except ValueError:
+                protocol_index = 0 # Default to the placeholder if value is missing
+
+        # 2. Determine the index for LLM Model
+        if application == "MCP Application":
+            # Auto-select "OpenAI gpt-4o" (which is now index 1)
+            llm_index = llm_options.index("OpenAI gpt-4o")
+        else:
+            # Revert to or maintain session state, defaulting to the placeholder ("Select LLM")
+            default_key = st.session_state.get("llm_select", "Select LLM")
+            try:
+                llm_index = llm_options.index(default_key)
+            except ValueError:
+                llm_index = 0 # Default to the placeholder if value is missing
+
+
+        # --- Selectboxes ---
 
         protocol = st.selectbox(
             "Protocol",
@@ -391,14 +414,23 @@ with st.sidebar:
             index=llm_index
         )
 
-        # Dynamic server tools selection based on discovered tools
+        # 3. Dynamic server tools selection
+        
+        # FIX: Use "Select Tool" as the explicit placeholder instead of ""
+        placeholder_tool = "Select Tool"
+        
         if application == "MCP Application" and "available_tools" in st.session_state and st.session_state.available_tools:
-            server_tools_options = [""] + list(st.session_state.available_tools.keys())
-            default_tool = list(st.session_state.available_tools.keys())[0] if st.session_state.available_tools else ""
-            server_tools_index = server_tools_options.index(default_tool) if default_tool else 0
+            # When MCP is selected and tools are available, load them
+            server_tools_keys = list(st.session_state.available_tools.keys())
+            server_tools_options = [placeholder_tool] + server_tools_keys
+            
+            # Default to the first actual tool, if available.
+            default_tool = server_tools_keys[0] if server_tools_keys else placeholder_tool
+            server_tools_index = server_tools_options.index(default_tool)
         else:
-            server_tools_options = ["", "sqlserver_crud", "postgresql_crud"]  # Fallback
-            server_tools_index = 0
+            # Fallback/Initial state: Only show the placeholder and fallback options
+            server_tools_options = [placeholder_tool, "sqlserver_crud", "postgresql_crud"]  
+            server_tools_index = 0 # Defaults to the placeholder "Select Tool"
 
         server_tools = st.selectbox(
             "Server Tools",
