@@ -430,8 +430,8 @@ logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
         f"""
-        <div style='display: flex; flex-direction: column; align-items: center; margin-bottom:20px;'>
-            <img src='data:image/png;base64,{logo_base64}' width='300'>
+        <div style='display: flex; flex-direction: column; align-items: center; margin-bottom: 25px;'>
+            <img src='data:image/png;base64,{logo_base64}' width='250' style='opacity: 0.9;'>
         </div>
         """,
         unsafe_allow_html=True
@@ -443,38 +443,40 @@ st.markdown(
         display: flex;
         flex-direction: column;
         align-items: center;
-        margin-bottom: 18px;
-        padding: 10px 0 10px 0;
+        margin-bottom: 30px; /* Increased bottom margin for better separation */
     ">
         <span style="
-            font-size: 2.5rem;
-            font-weight: bold;
-            letter-spacing: -2px;
-            color: #222;
+            font-size: 2.75rem; /* Slightly larger main heading */
+            font-weight: 700; /* Increased font weight for impact */
+            letter-spacing: -1.5px; /* Less aggressive letter spacing */
+            color: #1A1A1A; /* Slightly darker black for crispness */
+            line-height: 1.1; /* Tighter line height for the title */
         ">
-           Energy Efficiency Management
+            Energy Efficiency Management
         </span>
         <span style="
-            font-size: 1.15rem;
-            color: #555;
-            margin-top: 0.35rem;
+            font-size: 1.1rem; /* Slightly reduced font size for subtlety */
+            color: #6A6A6A; /* Slightly lighter gray for better contrast with the bold title */
+            margin-top: 1rem; /* Increased vertical space between title and subtitle */
+            font-weight: 400;
+            text-align: center;
         ">
-            Operational Excellence with Machine Learning
-and Generative AI 
+            Operational Excellence with Machine Learning and Generative AI
         </span>
         <hr style="
-        width: 80%;
-        border: none;
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #4286f4, transparent);
-        margin: 20px auto;
+            width: 50%; /* Reduced width of the separator line */
+            max-width: 400px;
+            border: none;
+            height: 3px; /* Slightly thicker line */
+            background: linear-gradient(90deg, transparent 5%, #4286f4, transparent 95%);
+            margin: 30px auto 0 auto; /* Increased top margin for separation */
+            border-radius: 5px; /* Subtle rounding for a modern touch */
         ">
     </div>
 
     """,
     unsafe_allow_html=True
 )
-
 # ========== SESSION STATE INIT ==========
 if "messages" not in st.session_state:
     st.session_state.messages = []
