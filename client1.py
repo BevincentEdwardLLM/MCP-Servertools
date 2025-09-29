@@ -358,54 +358,61 @@ def get_image_base64(img_path):
 with st.sidebar:
     st.markdown("<div class='sidebar-title'>Solutions Scope</div>", unsafe_allow_html=True)
     with st.container():
-        # Application selectbox (The default index 0 is "Select Application")
-        application = st.selectbox(
+        # Application selectbox (UI shows "Energy Efficiency Management", internal logic unchanged)
+        application_ui_map = {
+            "Select Application": "Select Application",
+            "Energy Efficiency Management": "MCP Application"  # UI text → internal logic
+        }
+        selected_ui = st.selectbox(
             "Select Application",
-            ["Select Application", "MCP Application"],
+            list(application_ui_map.keys()),
             key="app_select"
         )
+        application = application_ui_map[selected_ui]  # Use for all internal logic
 
         # --- Options Lists ---
-        # FIX: Changed "" to meaningful placeholder text like "Select Protocol"
-        protocol_options = ["Select Protocol", "MCP Protocol", "A2A Protocol"] 
-        # FIX: Changed "" to meaningful placeholder text like "Select LLM"
+        protocol_ui_map = {
+            "Select Protocol": "Select Protocol",
+            "EEM Protocol": "MCP Protocol",  # UI text → internal logic
+            "A2A Protocol": "A2A Protocol"    # unchanged
+        }
+        protocol_options_ui = list(protocol_ui_map.keys())
+
         llm_options = ["Select LLM", "OpenAI gpt-4o", "OpenAI gpt-4-turbo", "Anthropic claude-3-5-sonnet-20240620"]
 
         # --- Dynamic Index Logic ---
-
-        # 1. Determine the index for Protocol
+        # 1. Protocol
         if application == "MCP Application":
-            # Auto-select "MCP Protocol" (which is now index 1)
-            protocol_index = protocol_options.index("MCP Protocol")
+            default_protocol_internal = "MCP Protocol"
+            # Map internal protocol back to UI for selectbox index
+            protocol_index = protocol_options_ui.index(
+                next(k for k, v in protocol_ui_map.items() if v == default_protocol_internal)
+            )
         else:
-            # Revert to or maintain session state, defaulting to the placeholder ("Select Protocol")
             default_key = st.session_state.get("protocol_select", "Select Protocol")
             try:
-                protocol_index = protocol_options.index(default_key)
+                protocol_index = protocol_options_ui.index(default_key)
             except ValueError:
-                protocol_index = 0 # Default to the placeholder if value is missing
+                protocol_index = 0
 
-        # 2. Determine the index for LLM Model
+        # 2. LLM
         if application == "MCP Application":
-            # Auto-select "OpenAI gpt-4o" (which is now index 1)
             llm_index = llm_options.index("OpenAI gpt-4o")
         else:
-            # Revert to or maintain session state, defaulting to the placeholder ("Select LLM")
             default_key = st.session_state.get("llm_select", "Select LLM")
             try:
                 llm_index = llm_options.index(default_key)
             except ValueError:
-                llm_index = 0 # Default to the placeholder if value is missing
-
+                llm_index = 0
 
         # --- Selectboxes ---
-
-        protocol = st.selectbox(
+        protocol_selected_ui = st.selectbox(
             "Protocol",
-            protocol_options,
+            protocol_options_ui,
             key="protocol_select",
             index=protocol_index
         )
+        protocol = protocol_ui_map[protocol_selected_ui]  # Internal value for logic
 
         llm_model = st.selectbox(
             "LLM Models",
@@ -414,23 +421,17 @@ with st.sidebar:
             index=llm_index
         )
 
-        # 3. Dynamic server tools selection
-        
-        # FIX: Use "Select Tool" as the explicit placeholder instead of ""
+        # --- Dynamic server tools selection ---
         placeholder_tool = "Select Tool"
-        
+
         if application == "MCP Application" and "available_tools" in st.session_state and st.session_state.available_tools:
-            # When MCP is selected and tools are available, load them
             server_tools_keys = list(st.session_state.available_tools.keys())
             server_tools_options = [placeholder_tool] + server_tools_keys
-            
-            # Default to the first actual tool, if available.
             default_tool = server_tools_keys[0] if server_tools_keys else placeholder_tool
             server_tools_index = server_tools_options.index(default_tool)
         else:
-            # Fallback/Initial state: Only show the placeholder and fallback options
-            server_tools_options = [placeholder_tool, "sqlserver_crud", "postgresql_crud"]  
-            server_tools_index = 0 # Defaults to the placeholder "Select Tool"
+            server_tools_options = [placeholder_tool, "sqlserver_crud", "postgresql_crud"]
+            server_tools_index = 0
 
         server_tools = st.selectbox(
             "Server Tools",
@@ -440,6 +441,7 @@ with st.sidebar:
         )
 
         st.button("Clear/Reset", key="clear_button")
+
 
     st.markdown('<div class="sidebar-logo-label">Build & Deployed on</div>', unsafe_allow_html=True)
     logo_base64 = get_image_base64("llm.png")
@@ -457,13 +459,13 @@ with st.sidebar:
 
 
 # ========== LOGO/HEADER FOR MAIN AREA ==========
-logo_path = "llm.png"
+logo_path = "startuptn.png"
 logo_base64 = get_image_base64(logo_path) if os.path.exists(logo_path) else ""
 if logo_base64:
     st.markdown(
         f"""
         <div style='display: flex; flex-direction: column; align-items: center; margin-bottom: 25px;'>
-            <img src='data:image/png;base64,{logo_base64}' width='250' style='opacity: 0.9;'>
+            <img src='data:image/png;base64,{logo_base64}' width='300' style='opacity: 0.9;'>
         </div>
         """,
         unsafe_allow_html=True
