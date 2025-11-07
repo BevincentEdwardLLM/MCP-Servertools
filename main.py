@@ -582,20 +582,20 @@ def Bigquery_gallo_DB_MCP_Demo(sql: str) -> dict:
 Execute a SQL query on the BigQuery `genai-poc-424806.MCP_demo.youth_health_records` table containing youth health records.
 
 **Schema:** `genai-poc-424806.MCP_demo.youth_health_records`
-- id (INT64, PRIMARY KEY)
-- actual_release_date (DATE)
-- name_of_youth (STRING)
-- race_ethnicity (STRING)
-- medi_cal_id (STRING)
-- residential_address (STRING)
-- telephone (STRING)
-- medi_cal_health_plan (STRING)
-- health_screenings (STRING)
-- health_assessments (STRING)
-- chronic_conditions (STRING)
-- prescribed_medications (STRING)
-- notes (STRING)
-- care_plan_notes (STRING)
+- ID (INT64, PRIMARY KEY)
+- ActualReleaseDate (DATE)
+- NameOfYouth (STRING)
+- RaceEthnicity (STRING)
+- MediCalID (STRING)
+- ResidentialAddress (STRING)
+- Telephone (STRING)
+- MediCalHealthPlan (STRING)
+- HealthScreenings (STRING)
+- HealthAssessments (STRING)
+- ChronicConditions (STRING)
+- PrescribedMedications (STRING)
+- Notes (STRING)
+- CarePlanNotes (STRING)
 
 Use this tool to:
 - Retrieve youth health, plan, and assessment information
@@ -817,7 +817,70 @@ def Bigquery_SAC_CEQA_Analytics(sql: str) -> dict:
             "query_success": False,
             "error": str(e)
         }
-            
+
+
+# -----------------------------------------------------------------------------
+# 19).Servicenow User Details 
+# -----------------------------------------------------------------------------
+@mcp.tool(description="""
+Execute a SQL query on the BigQuery `servicenow_users` table containing user profile and license information.
+
+**Schema:** `genai-poc-424806.vapi_ai_demo.servicenow_users`
+- username (STRING)
+- password (STRING)
+- phone_No (STRING)
+- address (STRING)
+- emp_id(STRING)
+- servicenow_id(STRING)
+- Password_Creation_Time (TIMESTAMP)
+- Password_Last_Modified (TIMESTAMP)
+
+    
+
+Use this tool to:
+- Retrieve user credentials and contact details,emp_id
+- Filter users by issues, user_id, or emp_id
+- Join with other activity or ticket data by username
+
+**Example:** SELECT * FROM `genai-poc-424806.vapi_ai_demo.servicenow_users` WHERE address LIKE '%San Jose%'
+""")
+def tool_servicenowUsers(sql: str) -> dict:
+    try:
+        rows = run_bq(sql)
+        return {"table": "servicenow_users", "row_count": len(rows), "rows": rows}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# -----------------------------------------------------------------------------
+# 20).Servicenow Ticket details
+# -----------------------------------------------------------------------------
+@mcp.tool(description="""
+Execute a SQL query on the BigQuery `servicenow_ticket_details` table containing ticket and issue tracking information.
+
+**Schema:** `genai-poc-424806.vapi_ai_demo.servicenow_ticket_details`
+- ticket_id (STRING)
+- user_id (STRING)
+-issues(STRING)
+-status(STRING)
+-criticality(STRING)
+-emp_id(STRING)- refers to `emp_id` in the servicenow_users table
+-assigned_date(STRING)
+
+Use this tool to:
+- Retrieve support or issue tickets
+- Filter by user, ticket ID, or keyword in issues
+- Join with user data to get profile details
+
+**Example:** SELECT * FROM `genai-poc-424806.vapi_ai_demo.servicenow_ticket_details` WHERE issues LIKE '%login%'
+""")
+def tool_servicenowTicketDetails(sql: str) -> dict:
+    try:
+        rows = run_bq(sql)
+        return {"table": "servicenow_ticket_details", "row_count": len(rows), "rows": rows}
+    except Exception as e:
+        return {"error": str(e)}
+
 
 # === Entrypoint ===
 if __name__ == "__main__":
